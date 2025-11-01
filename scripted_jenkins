@@ -1,0 +1,68 @@
+node('Maven') {
+
+    // Define tools
+    def MAVEN_HOME = tool name: 'Maven-3.8.9', type: 'maven'
+
+    // Define environment variables
+    env.IMAGE_NAME = "ahmedezz799/jenkins-iti"
+
+    try {
+        stage('Checkout') {
+            git branch: 'main', url: 'https://github.com/ahmedmohamedezz/jenkine_iti'
+        }
+
+        stage('Build') {
+            echo "Build Number: ${currentBuild.number}"
+
+            if (currentBuild.number < 5) {
+                error("Build number is less than 5. Stopping pipeline!")
+            }
+
+            sh "${MAVEN_HOME}/bin/mvn clean package"
+        }
+
+        stage('Docker Build') {
+            sh "docker build -t ${env.IMAGE_NAME}:${env.BUILD_NUMBER} ."
+        }
+
+        stage('Docker Login') {
+            withCredentials([string(credentialsId: 'dockerhub-token', variable: 'DOCKERHUB_TOKEN')]) {
+                sh '''
+                    echo $DOCKERHUB_TOKEN | docker login -u ahmedezz799 --password-stdin
+                '''
+            }
+        }
+
+        stage('Docker Push') {
+            sh "docker push ${env.IMAGE_NAME}:${env.BUILD_NUMBER}"
+        }
+
+        stage('Deploy') {
+            sh """
+                echo "Deploying container..."
+
+                # Stop & remove old container if exists
+                docker stop python-app || true
+                docker rm python-app || true
+
+                # Run new container on port 9000 instead of 8080
+                docker run -d -p 9000:8080 --name python-app ${env.IMAGE_NAME}:${env.BUILD_NUMBER}
+
+                echo "App is running on: http://<your-server-ip>:9000"
+            """
+        }
+
+        echo "Pipeline finished successfully!"
+
+    } catch (err) {
+        echo "Pipeline failed: ${err}"
+        currentBuild.result = 'FAILURE'
+        throw err
+
+    } finally {
+        echo "Cleaning workspace..."
+        cleanWs()
+    }
+}
+
+

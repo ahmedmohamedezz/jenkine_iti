@@ -1,0 +1,51 @@
+node('Maven') {
+
+    def IMAGE_NAME = "beshoybotros/python-iti-main-jenkins-scripted"
+
+    stage('Checkout') {
+        git branch: 'main', url: 'https://github.com/BeshoiBotros/python-iti-main-jenkins'
+    }
+
+    stage('Build') {
+        withEnv(["PATH+MAVEN=${tool 'Maven-3.8.9'}/bin"]) {
+            echo "Build Number: ${currentBuild.number}"
+
+            if (currentBuild.number.toInteger() < 5) {
+                error("Build number is less than 5. Stopping pipeline!")
+            }
+
+            sh "mvn clean package"
+        }
+    }
+
+    stage('Docker Build') {
+        sh "docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} ."
+    }
+
+    stage('Docker Login') {
+        withCredentials([string(credentialsId: 'dockerhub-pass', variable: 'DOCKERHUB_PASS')]) {
+            sh """echo "$DOCKERHUB_PASS" | docker login -u beshoybotros --password-stdin"""
+        }
+    }
+
+    stage('Docker Push') {
+        sh "docker push ${IMAGE_NAME}:${BUILD_NUMBER}"
+    }
+
+    stage('Deploy') {
+        sh """
+            echo "Deploying container..."
+
+            docker stop python-app || true
+            docker rm python-app || true
+
+            docker run -d -p 9000:8080 --name python-app ${IMAGE_NAME}:${BUILD_NUMBER}
+
+            echo "App: http://<your-server-ip>:9000"
+        """
+    }
+
+    // POST actions manual block
+    echo "🧹 Cleaning workspace..."
+    cleanWs()
+}
